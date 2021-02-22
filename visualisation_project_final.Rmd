@@ -1,0 +1,378 @@
+---
+title: "Visualisation Group Project"
+author: "Group A4"
+date: "1/12/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, message = FALSE,warning=FALSE}
+# Load the tidyverse packages
+library(tidyverse)
+library(RColorBrewer)
+library(patchwork)
+library(wordcloud)
+library(wordcloud2)
+library(tm)
+library(rgdal)
+library(plotly)
+```
+
+```{r}
+listings <- read.csv("listings.csv")
+reviews <- read.csv("reviews.csv")
+calendar <- read.csv("calendar.csv")
+housing <- read.csv("housing.csv")
+```
+
+#1. Business Topic
+
+VanguardInvestments is an investment firm that specializes on innovative real estate investment strategies. One of our clients has approached the company in order to evaluate the option of purchasing property in London and leasing it on Airbnb as a potentially attractive investment strategy. The client has asked our team to analyse the current Airbnb market and provide him with the best neighborhood to invest in as well as the best pricing strategy to incorporate in order to have a competitive Airbnb listing and to make his investment a profitable one.
+
+#1b. Data Sources
+In order to start evaluating the clients project, the team looked into potential data sources because the analysis of this investment strategy will rely heavily on Airbnb Data and Housing data. The Airbnb data was collected from InsideAirbnb (http://insideairbnb.com/get-the-data.html) where data describing listing, reviews and calender prices were found for the city of London. 
+The average house prices by neighborhood were provided by the city of London governmental website. (https://data.london.gov.uk/dataset/average-house-prices)
+
+#2. Data Cleaning
+After downloading all the data, the different datasets are evaluated and are cleaned. For the listings, the listings with no reviews are considered to be too new or inactive and are therefore omitted from the analysis. Also, since the prime focus was the listing information, the columns containing the host information are removed from the database.
+The housing dataset that was downloaded also needs to be cleaned as the datatype isn't ideal for analysis and the dates are not displayed correctly.
+
+```{r}
+listings1 <- listings %>% filter(!is.na(review_scores_rating)) %>%
+  select(-c(starts_with("host"), listing_url,
+            scrape_id,last_scraped,name,picture_url))
+```
+
+#3. Exploratory Data Analysis
+
+A) Average Airbnb Price and Count per Neighborhood.
+
+After clearning the listing data, the first step is to see how many listings there are. From the cleaned dataset, we can see that there are 53,693 listings in our dataset, and there are 33 neighbourhoods in the UK regions that offer airbnb listings in our dataset. Each listings are classified into 4 room types: "Entire home/apt", "private room", "Hotel room", and "Shared room".
+
+- Our client’s priority is to be in a neighborhood that maximizes potential profit. For this investment, the client has provided us with a few extra specifications:
+
+1. Only 1 Bedroom.
+
+2. Only rented as an entire home/apt. Therefore, all listings outside those specifications are filtered out.
+
+The first step of the analysis involves determining which neighborhoods generate the highest profits if rented out throughout the year. The price of each listing was provided and then grouped by neighborhood where the mean profitwas calculated.
+
+```{r eval=FALSE, include=FALSE, results='hide'}
+listings_entire <- listings1 %>% filter(room_type == "Entire home/apt", !is.na(bedrooms))
+listings_entire$price <- as.numeric(sub('\\,','',sub('\\$','',listings_entire$price)))
+listings_entire <- listings_entire %>% filter(bedrooms == 1)
+listings_entire <- listings_entire %>% filter(price <= 400)
+avg_prices <- listings_entire %>% group_by(neighbourhood_cleansed) %>% summarise(price=mean(price,na.rm = TRUE))
+avg_prices$profits <- avg_prices$price * 365
+avg_prices <- avg_prices %>% mutate(rank = rank(profits),
+                      top = ifelse(rank > 23, "top ten", "others")) 
+
+p_profits <- ggplot(data = avg_prices,
+                    aes(x=reorder(neighbourhood_cleansed,profits),
+                        y = profits,fill=top)) +
+  geom_bar(stat="identity") + coord_flip() + 
+  labs(title ="Potential Profit per Neighborhood", 
+       x ="Neighborboods", fill="Profit Rank") + theme_bw()
+p_profits
+```
+ 
+Insights:
+
+- Even though prominent areas in central London generate the most profit due to their prime locations, there are less popular places like Islington and Richmond upon Thames, which have a high profit margin.
+
+- The maximum potential profit per neighborhood is $40,000 in Westminster, whilst the least favored neighborhood is Barking and Dagenham with potential profit being just over 20,000.
+
+- This bar plot gives an indication that the potential profits that our client could make falls in the range of 20k-40k$. However, given the narrow price differences, the bar chart begs the need for a deeper analysis and more factor consideration.
+ 
+ 
+B) Visualise key metrics in Map
+
+```{r, warning=FALSE, message=FALSE}
+london_boroughs <- readOGR(dsn = "LondonBoroughs.shp") 
+avg_prices <- head(arrange(avg_prices, desc(profits)),10)
+
+summary_listing <- listings_entire %>% 
+  filter(neighbourhood_cleansed %in% 
+           unique(avg_prices$neighbourhood_cleansed)) %>%
+                    group_by(neighbourhood_cleansed) %>%
+  summarise(ave_price = mean(price, na.rm = TRUE), 
+            count = n(), 
+            ave_rate_value = mean(review_scores_value, na.rm = TRUE),
+            ave_rate_loc = mean(review_scores_location, na.rm = TRUE),
+            overall = (ave_rate_value+ave_rate_loc)/2)
+
+london_boroughs@data <- left_join(london_boroughs@data, summary_listing, by = c('name' = 'neighbourhood_cleansed'))
+
+london_boroughs_f <- fortify(london_boroughs)
+
+london_boroughs$id <- row.names(london_boroughs)
+london_boroughs_f <- left_join(london_boroughs_f, london_boroughs@data) 
+
+summary_name <- london_boroughs_f %>% group_by(name) %>% summarise(mean_long = mean(long), mean_lat = mean(lat))
+
+p5 <- ggplot(london_boroughs_f, aes(long, lat, group = group, fill = overall)) +
+  geom_polygon(size = 0.25,colour = "black") + scale_fill_gradientn(colors = brewer.pal(8,"Purples"))+
+  theme_void() + labs(title="Overall Rating per Neighborhood") + labs(fill='Overall Rating Score')
+p5
+```
+
+```{r}
+summary_listing<-head(arrange(summary_listing,desc(overall)),3)
+```
+
+
+Insights: 
+
+- The heat map affirms the latter assumption given the ratings of these neighborhoods lie above 9 on a scale of 1 to 10. 
+
+- Out of the top 10, we are able to shortlist 3 of neighborhoods namely, Richmond upon Thames, Islington and Wandsworth as their ratings signify the existence of highest customer satisfaction. 
+
+- Although boroughs in Central London have extremely high location ratings due to popularity, they do not score well for value.
+
+
+C) Average Prices and Average Profit Per Airbnb per Annum
+
+Now that the top 3 neighborhoods have been shortlisted, it is essential to determine how the prices of homes in these neighborhoods have evolved over time. In order to to this, a time-series graph was used in order to compare the evolution in average prices of 1 bedroom homes in these neighborhoods.
+
+
+```{r}
+listings_entire$profits_annum <- listings_entire$price*(365)*(0.55)
+
+housing_stats <-housing %>%
+  mutate(year=as.numeric(substring(housing$Year,first=17, 
+                                   last=21))) %>% mutate(value=as.numeric(gsub(",","",housing$Value))) %>%
+              filter(year>=2010 & Area %in% unique(summary_listing$neighbourhood_cleansed)) %>%
+              group_by(Area,year) %>%
+              summarise(mean=mean(value)) %>%
+              ggplot(aes(x=year,y=mean,group=Area,color=Area)) + geom_line() +scale_y_continuous(labels = function(x) format(x, scientific = FALSE)) + theme_bw() + xlab('Year')+ylab('Average Home Price') + ggtitle('Average Home Price per Neighborhood')
+housing_stats
+```
+
+Insights
+
+potentially lucrative neighborhoods, we scrutinize data to observe whether the trend of market price tells us the same story that the ratings of these neighborhoods do. Whilst Richmond has been slightly higher than Islington and Wandsworth, all three of them show a bullish movement in price change since 2010.
+
+
+D) Payback Period
+
+Now, based on the three identified neighborhood, the average annual profits are calculated for one bedrooms in those neighborhoods. For this calculation, the average price is multiplied by the number of occupied days. The profit calculated is subject to a Airbnb commission of 20% and Capital Gain Tax of 25%.
+
+The Average prices are used to approximately establish a budget for the purchase of a home in these neighborhoods. This median price will allow us to calculate a ROI which will allow the client to determine
+
+```{r}
+summary_profits <- listings_entire %>% filter(neighbourhood_cleansed %in% unique(summary_listing$neighbourhood_cleansed)) %>%
+                    group_by(neighbourhood_cleansed) %>%
+  summarise(ave_profits = mean(profits_annum, na.rm = TRUE)) %>%
+              rename(Area=neighbourhood_cleansed)
+#summary_listing  <- summary_listing  %>% rename(Area=neighbourhood_cleansed)
+
+housing_prices <-housing %>%
+              mutate(
+              year = as.numeric(substring(housing$Year, first=17, last=21))
+              ) %>%
+              mutate(
+              value=as.numeric(gsub(",","",housing$Value))
+              ) %>%
+              filter(Area %in% unique(summary_listing$neighbourhood_cleansed)) %>%
+              group_by(Area,year) %>%
+              summarise(
+                mean=mean(value),
+              ) %>%
+              filter(year==2017) 
+  
+investment <- merge(x=summary_profits,y=housing_prices,by="Area",all.x=TRUE)
+investment$payback <- investment$mean/investment$ave_profits
+
+Areas<-c("Wandsworth","Wandsworth","Wandsworth","Wandsworth","Wandsworth","Wandsworth","Richmond upon Thames","Richmond upon Thames","Richmond upon Thames","Richmond upon Thames","Richmond upon Thames","Richmond upon Thames","Islington","Islington","Islington","Islington","Islington","Islington")
+Years <- c(0,5,10,15,20,25,0,5,10,15,20,25,0,5,10,15,20,25)
+Amount <- c(-488895.9,-488895.9+17791.13*5,-488895.9+17791.13*10,-488895.9+17791.13*15,-488895.9+17791.13*20,-488895.9+17791.13*25,-478801.8,-478801.8+19015.07*5,-478801.8+19015.07*10,-478801.8+19015.07*15,-478801.8+19015.07*20,-478801.8+19015.07*25,-464752.2,-464752.2+18933.82*5,-464752.2+18933.82*10,-464752.2+18933.82*15,-464752.2+18933.82*20,-464752.2+18933.82*25)
+PP.data <- data.frame(Areas,Years, Amount)
+options(scipen=999)
+
+ggplot(data = PP.data, aes(x = Years, y = Amount,fill=Areas,color=Areas)) + geom_bar(position="dodge",stat='identity') + ggtitle("Return on Investment") + theme_bw()
+```
+
+Insights:
+
+- As seen in the Bar Chart above, the neighborhood with the shortest payback period is Islington. Islington has a payback period of 24.5 years while the other payback periods exceed 25 years.
+
+- It is of prime importance for the client to recuperate his money as fast as possible, therefore the recommendation for the neighborhood the client should invest in is Islington due to its low payback period and popularity.
+
+
+F) Pricing Strategies
+
+Apart from selecting the right neighborhood, we also want to make sure that our client takes advantage of the power they possess to change the rental price of their future Airbnb investment in Islington, and hence we decide to monitor the market variability of current Airbnb listings in Islington. The analysis is divided into 2 categories: the occurrence of monthly price change and the occurrence of weekly price change.
+
+```{r}
+min_date <- min(calendar$date)
+max_date <- max(calendar$date)
+
+calendar$available <- as.logical(toupper(calendar$available))
+
+calendar$date <- as.Date(calendar$date)
+
+calendar_available <- calendar %>% group_by(date) %>% summarise(ave_availability = mean(available, na.rm = TRUE))
+
+Islington <- listings_entire %>% filter(neighbourhood_cleansed == 'Islington')
+unique_id <- Islington$id
+calendar_islington <- calendar %>% filter(listing_id %in% unique_id)
+calendar_islington$available <- as.logical(toupper(calendar_islington$available))
+calendar_islington$date <- as.Date(calendar_islington$date)
+
+x <- as.numeric(sub('\\,','',sub('\\$','',calendar_islington$adjusted_price)))
+calendar_islington$adjusted_price <- x
+
+calendar_islington <- calendar_islington %>% filter(!is.na(adjusted_price))
+islington_price <- calendar_islington %>% 
+  mutate(month = format(date, "%m")) %>% 
+  group_by(month) %>% 
+  summarise(ave_price = mean(adjusted_price, na.rm = TRUE))
+
+islington_price$month <- c(1:12)
+ggplot(islington_price, aes(x=month,y=ave_price)) +
+  geom_line() +scale_x_continuous(breaks=1:12) +
+  labs(title ="Average Price change in month",
+       x ="", y = "Average Price") +
+  geom_text(label = c("lowest = 96"), aes(x = c(11),
+                                                y = c(100)),
+                                                colour="red") +
+  geom_text(label = c("highest = 106"), aes(x = c(7),
+                                                y = c(107)),
+                                                colour="blue") +
+  geom_point(aes(x=c(11),y=c(95.98642)),color = "red",size=0.6) +
+  geom_point(aes(x=c(7),y=c(106.10721)),color = "blue",size=0.6) +
+  theme(legend.position = "none") + xlab('Month')+
+  theme_bw() 
+```
+
+Insights:
+
+- We can see from the above plot that on average, the listing prices are higher in June, July, August and September, all with an average price above $103/night. The lowest price is in November then gradually increase in December.
+
+- The monthly price change signifies that late spring and summer months ranging from April to July are when Islington has an influx of potential tourists and hence seems like the best time to raise prices to obtain the optimal return on investment.
+
+
+```{r}
+calendar_islington <- calendar_islington %>% mutate(weekday = weekdays(date))
+calendar_islington$weekday <- as.factor(calendar_islington$weekday)
+
+calendar_islington$weekday <- factor(calendar_islington$weekday, levels=c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"))
+
+islington_week <- calendar_islington %>% group_by(weekday) %>% summarise(ave_price = mean(adjusted_price))
+
+df <- data.frame(x=c(1:7),y = islington_week$ave_price)
+
+ggplot(data = islington_week,
+       aes(x = weekday, y = ave_price)) +
+  geom_point(size=0.6) + geom_line(df,mapping = aes(x=x,y=y)) +
+  labs(title ="Average Price change in weekdays",
+       x ="", y = "Average Price") +
+  geom_text(label = c("lowest = 101"), aes(x = c(2),
+                                                y = c(101.5)),
+                                                color="red") +
+  geom_text(label = c("highest = 103.3"), aes(x = c(6.7),
+                                                y = c(103.5)),
+                                                color="blue") +
+  geom_point(aes(x=c(2),y=c(101.01)),color = "red",size=0.6) +
+  geom_point(aes(x=c(7),y=c(103.3)),color = "blue",size=0.6) +
+  xlab('Weekday')+
+  theme_bw() 
+```
+
+Insights:
+
+- As for the pricing in weekdays, hosts would generally set a higher price for Friday and Saturday, which makes sense because Friday and Saturday are the time when people finish a week’s work for a trip. Sunday and Monday have the lowest prices, probably because people don’t usually go on a trip at the beginning of the week, with a lower demand, hosts would hope to attract customer with a lower price.
+
+
+- The weekly price change on the other hand gives a more intricate time period to capitalize on, the weekend, which indicates a spike in tourists searching for short-term lodgings.
+
+- From an optimistic perspective, this pricing strategy also signifies that there exists a myriad of opportunity to potentially decrease the payback time in order to make early gains on this long-term investment.
+
+G) Amenities
+
+In order to make this investment successful in the long-term, we want to make sure that our client makes substantial profit but also builds a better reputation as a host on Airbnb. This implies achieving high ratings as a host and appeasing guests in terms of the amenities provided at the Airbnb property.
+
+
+```{r}
+text = listings_entire$amenities
+docs = Corpus(VectorSource(text))
+docs <- docs %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(docs) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words)
+
+set.seed(123) # for reproducibility 
+wordcloud(words = df$word, freq = df$freq, min.freq = 1, max.words=200, random.order=FALSE, rot.per=0.35, scale = c(3.5,0.25), colors=brewer.pal(8, "Dark2"))
+
+```
+
+
+Insights:
+
+- Some of the most common and well-received ratings state that a listing with appropriate safety measures like security and smoke alarms, fire extinguishers along with free Wi-Fi, toiletries and similar conveniences are classified as important characteristics of a well-furnished Airbnb rental.
+
+- The word cloud that we built for our client hints towards the aforementioned amenities and many more that could be considered by our client to make the investment a success.
+
+## The Final Recommendation : 
+
+- Based on average reviews and payback period, our recommendation to the client is to purchase a house in Islington. 
+
+- After purchasing, the ideal pricing strategy is as follows : High prices of 102$ on average from April to September and the lowest price in November as demand for Airbnbs seems low. Within a given week, our client should increase his prices by 2.5% on weekends. 
+
+- Finally, the client should equip his Airbnb with the most popular ammenities, such as fire alram, dryer, wifi, heating.
+
+
+
+## addition analysis on reviews
+
+Review analysis
+
+since we have 1,207,898 reviews in our dataset, which would be too large for R to handle, we decided to randomly select 10,000 reviews for our analysis.
+```{r, warning=FALSE, message=FALSE}
+
+set.seed(123)
+index <- sample (c(1:1207898), size=10000, replace =F)
+
+#Create a vector containing only the text
+text <- reviews$comments[index]
+
+# Create a corpus  
+docs <- Corpus(VectorSource(text))
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(textstem)
+
+docs <- lemmatize_words(docs)
+
+docs <- docs %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, 
+               c(stopwords("english"),"london","will","also","many",
+                 "highly","just","bit","get", "stay","lovely","great",
+                 "really","definitely"))
+
+dtm <- TermDocumentMatrix(docs) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words)
+
+set.seed(123) # for reproducibility 
+wordcloud(words = df$word, freq = df$freq, min.freq = 1,
+          max.words=200, random.order=FALSE,
+          rot.per=0.35,colors=brewer.pal(8, "Dark2"))
+```
+
+
+
