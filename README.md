@@ -10,3 +10,5 @@ The html is knitted from the original Rmarkdown file outlines the step taken to 
 
 Through this analysis, we evaluate the pricing for different types of listings (housing type and number of rooms), the customer reviews of each borough in London, Pricing seasonality changes (in week and in month), investment return situation, and finally, the most popular amenities included in the listings. It provides analysis and insights for locations, housing types, amentities included and pricing changes for people who want to invest a property and listed on airbnb in London.
 
+NLP is also performed to analyzed text data, and world cloud is generated for visualization purpose
+
